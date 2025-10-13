@@ -10,6 +10,6 @@ type Handler interface {
 }
 
 type Docker interface {
-	CreateAndStartContainer(imageName, name string, cmd []string) (string, error)
+	BuildAndStartContainer(imageName, name string) (string, error)
 	DestroyContainer(containerID string) error
 }
