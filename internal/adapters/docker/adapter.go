@@ -43,7 +43,9 @@ func (a *Adapter) CreateAndStartContainer(imageName, containerName string, cmds 
 		Image: imageName,
 		Cmd:   []string{"/bin/sh", "-c", "tail -f /dev/null"}, // Keep container running
 		Tty:   false,
-	}, nil, nil, nil, containerName)
+	}, &container.HostConfig{
+		PublishAllPorts: true,
+	}, nil, nil, containerName)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
