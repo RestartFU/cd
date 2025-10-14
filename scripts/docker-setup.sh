@@ -18,7 +18,7 @@ CONTAINER_NAME="cd-server"
 IMAGE_NAME="cd-tool"
 IMAGE_TAG="latest"
 SERVER_PORT="8080"
-CONFIG_FILE="config.toml"
+CONFIG_FILE="config/config.toml"
 
 # Print colored output
 print_status() {
@@ -93,7 +93,7 @@ WORKDIR /app
 COPY bin/cd-server ./cd-server
 
 # Copy config file (if exists)
-COPY config.toml* ./
+COPY config/config.toml* ./
 
 # Create directories for temporary files
 RUN mkdir -p /tmp/cd-deployments && \
@@ -180,6 +180,9 @@ EOF
 create_config() {
     if [ ! -f "$CONFIG_FILE" ]; then
         print_status "Creating default configuration file..."
+
+        # Create config directory if it doesn't exist
+        mkdir -p config
 
         cat > "$CONFIG_FILE" << 'EOF'
 # CD Tool Server Configuration

@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	cfg, err := loadConfig("config.toml")
+	cfg, err := loadConfig("config/config.toml")
 	if err != nil {
 		log.Fatalln(err)
 	}

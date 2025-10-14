@@ -1,10 +1,10 @@
-version: '3.8'
+version: "3.8"
 
 services:
   cd-server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: deploy/Dockerfile
     container_name: cd-server
     restart: unless-stopped
     ports:
@@ -13,7 +13,7 @@ services:
       # Mount Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount config file
-      - ./config.toml:/app/config.toml:ro
+      - ../config/config.toml:/app/config.toml:ro
       # Optional: Mount logs directory
       - ./logs:/app/logs
     environment:
@@ -116,7 +116,6 @@ volumes:
     driver: local
   grafana-data:
     driver: local
-
 # Usage Examples:
 #
 # Basic setup (CD server only):

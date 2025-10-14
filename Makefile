@@ -35,7 +35,7 @@ run-server: build-server
 # Run tests
 test:
 	@echo "Running tests..."
-	./test.sh
+	./scripts/test.sh
 
 # Run unit tests only
 test-unit:

@@ -22,7 +22,7 @@ WORKDIR /app
 COPY bin/cd-server ./cd-server
 
 # Copy config file (if exists)
-COPY config.toml* ./
+COPY config/config.toml* ./
 
 # Create directories for temporary files
 RUN mkdir -p /tmp/cd-deployments && \

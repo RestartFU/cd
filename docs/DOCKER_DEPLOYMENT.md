@@ -8,10 +8,10 @@ This guide explains how to deploy the CD Tool server using Docker for production
 
 ```bash
 # Run the automated setup script
-./docker-setup.sh
+./scripts/docker-setup.sh
 
 # Or with custom options
-./docker-setup.sh --port 9000 --logs
+./scripts/docker-setup.sh --port 9000 --logs
 ```
 
 ### Option 2: Docker Compose
@@ -36,7 +36,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config.toml:/app/config.toml:ro \
+  -v $(pwd)/config/config.toml:/app/config.toml:ro \
   cd-tool:latest
 ```
 

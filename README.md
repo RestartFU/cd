@@ -34,7 +34,7 @@ make build
 
 ```bash
 # Configure server
-cat > config.toml << EOF
+cat > config/config.toml << EOF
 listen_addr = ':8080'
 api_keys = ['your-secret-key']
 EOF
@@ -134,10 +134,10 @@ Use the automated setup script for easy Docker deployment:
 
 ```bash
 # Automated setup with all dependencies
-./docker-setup.sh
+./scripts/docker-setup.sh
 
 # Or with custom options
-./docker-setup.sh --port 9000 --logs
+./scripts/docker-setup.sh --port 9000 --logs
 ```
 
 ### Docker Compose
@@ -162,7 +162,7 @@ docker run -d \
   --restart unless-stopped \
   -p 8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config.toml:/app/config.toml:ro \
+  -v $(pwd)/config/config.toml:/app/config.toml:ro \
   cd-tool:latest
 ```
 
@@ -205,10 +205,10 @@ docker stop cd-server
 docker start cd-server
 
 # Update deployment
-./docker-setup.sh --rebuild
+./scripts/docker-setup.sh --rebuild
 
 # Complete cleanup
-./docker-setup.sh --remove
+./scripts/docker-setup.sh --remove
 ```
 
 ## Environment Variables & Secrets
@@ -273,7 +273,7 @@ make build
 make test
 
 # Run tests
-./test.sh
+./scripts/test.sh
 
 # Format & vet
 make fmt
