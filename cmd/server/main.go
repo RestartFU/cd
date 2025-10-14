@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"slices"
+	"os/signal"
+	"syscall"
 
 	"github.com/restartfu/cd/internal"
 	"github.com/restartfu/cd/internal/config"
+	"github.com/restartfu/cd/internal/protocol"
 	"github.com/restartfu/gophig"
 )
 
@@ -18,18 +19,33 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	service, err := internal.Assemble(cfg, func(r *http.Request) bool {
-		apiKey := http.Header(r.Header).Get("API_KEY")
-		if slices.Contains(cfg.APIKeys, apiKey) {
-			return true
-		}
-		return false
-	})
+	// Create the handler
+	handler, err := internal.CreateHandler()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	log.Fatalln(service.Start(cfg.ListenAddr))
+	// Create TCP server
+	server := protocol.NewServer(handler, cfg)
+
+	// Setup graceful shutdown
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Println("Shutting down server...")
+		if err := server.Stop(); err != nil {
+			log.Printf("Error during shutdown: %v", err)
+		}
+		os.Exit(0)
+	}()
+
+	// Start the server
+	log.Printf("Starting TCP server on %s", cfg.ListenAddr)
+	if err := server.Start(cfg.ListenAddr); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
 }
 
 func loadConfig(configPath string) (config.Config, error) {

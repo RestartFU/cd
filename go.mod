@@ -1,11 +1,11 @@
 module github.com/restartfu/cd
 
-go 1.25.1
+go 1.24.0
 
 require (
 	github.com/docker/docker v28.5.1+incompatible
+	github.com/docker/go-connections v0.6.0
 	github.com/go-git/go-git/v5 v5.16.3
-	github.com/gorilla/mux v1.8.1
 	github.com/restartfu/gophig v0.1.0
 )
 
@@ -19,7 +19,6 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.4.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

@@ -1,0 +1,297 @@
+name: Deploy with CD Tool
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: false
+        default: "production"
+        type: string
+      cd_server_host:
+        description: "CD Server hostname (overrides secret)"
+        required: false
+        type: string
+      timeout:
+        description: "Deployment timeout in minutes"
+        required: false
+        default: 10
+        type: number
+      env_vars:
+        description: "Environment variables to pass to container (KEY=VALUE,KEY2=VALUE2)"
+        required: false
+        type: string
+      env_file:
+        description: "Path to environment file to load (.env format)"
+        required: false
+        type: string
+      include_github_secrets:
+        description: "Include all GitHub secrets as environment variables"
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      CD_SERVER_HOST:
+        description: "CD Server hostname and port (e.g., cd-server.example.com:8080)"
+        required: true
+      CD_API_KEY:
+        description: "API key for CD server authentication"
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout }}
+
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [ -z "${{ secrets.CD_SERVER_HOST }}" ] && [ -z "${{ inputs.cd_server_host }}" ]; then
+            echo "❌ Error: CD_SERVER_HOST secret or cd_server_host input is required"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.CD_API_KEY }}" ]; then
+            echo "❌ Error: CD_API_KEY secret is required"
+            exit 1
+          fi
+
+          echo "✅ Configuration validated"
+
+      - name: Download CD CLI
+        run: |
+          echo "📥 Downloading CD CLI tool..."
+
+          # Determine architecture
+          ARCH=$(uname -m)
+          case $ARCH in
+            x86_64) ARCH="amd64" ;;
+            aarch64|arm64) ARCH="arm64" ;;
+            *) echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          # Download latest release
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/RestartFU/cd/releases/latest | grep tag_name | cut -d '"' -f 4)
+          DOWNLOAD_URL="https://github.com/RestartFU/cd/releases/download/${LATEST_RELEASE}/cd-cli-linux-${ARCH}"
+
+          echo "🔄 Downloading from: $DOWNLOAD_URL"
+          curl -L -o cd-cli "$DOWNLOAD_URL"
+          chmod +x cd-cli
+
+          # Verify download
+          ./cd-cli -help > /dev/null
+          echo "✅ CD CLI downloaded and verified"
+
+      - name: Prepare environment variables
+        id: prepare-env
+        env:
+          INPUT_ENV_VARS: ${{ inputs.env_vars }}
+          INPUT_ENV_FILE: ${{ inputs.env_file }}
+          INCLUDE_GITHUB_SECRETS: ${{ inputs.include_github_secrets }}
+        run: |
+          echo "📋 Preparing environment variables..."
+
+          # Create temporary files for env vars and secrets
+          ENV_VARS_FILE=$(mktemp)
+          SECRETS_FILE=$(mktemp)
+
+          # Process environment file if provided
+          if [ -n "$INPUT_ENV_FILE" ] && [ -f "$INPUT_ENV_FILE" ]; then
+            echo "📁 Loading environment variables from: $INPUT_ENV_FILE"
+            # Filter out comments and empty lines, validate format
+            grep -v '^#' "$INPUT_ENV_FILE" | grep -v '^$' | while IFS= read -r line; do
+              if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+                echo "$line" >> "$ENV_VARS_FILE"
+              else
+                echo "⚠️  Warning: Skipping invalid line in env file: $line"
+              fi
+            done
+          fi
+
+          # Process command line env vars
+          if [ -n "$INPUT_ENV_VARS" ]; then
+            echo "⚡ Processing command line environment variables..."
+            IFS=',' read -ra VARS <<< "$INPUT_ENV_VARS"
+            for var in "${VARS[@]}"; do
+              if [[ "$var" =~ ^[A-Za-z_][A-Za-z0-9_]*=.* ]]; then
+                echo "$var" >> "$ENV_VARS_FILE"
+              else
+                echo "⚠️  Warning: Skipping invalid env var format: $var"
+              fi
+            done
+          fi
+
+          # Include GitHub secrets if requested
+          if [ "$INCLUDE_GITHUB_SECRETS" = "true" ]; then
+            echo "🔐 Including GitHub secrets as environment variables..."
+            # Note: Actual secrets will be passed securely in the next step
+            echo "GITHUB_SECRETS_INCLUDED=true" >> "$SECRETS_FILE"
+          fi
+
+          # Set outputs
+          echo "env_vars_file=$ENV_VARS_FILE" >> $GITHUB_OUTPUT
+          echo "secrets_file=$SECRETS_FILE" >> $GITHUB_OUTPUT
+
+          # Count variables (for logging)
+          ENV_COUNT=$(wc -l < "$ENV_VARS_FILE" 2>/dev/null || echo "0")
+          SECRET_COUNT=$(wc -l < "$SECRETS_FILE" 2>/dev/null || echo "0")
+          echo "📊 Environment variables: $ENV_COUNT"
+          echo "📊 Secrets: $SECRET_COUNT"
+
+      - name: Deploy application
+        env:
+          CD_SERVER_HOST: ${{ inputs.cd_server_host || secrets.CD_SERVER_HOST }}
+          CD_API_KEY: ${{ secrets.CD_API_KEY }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          COMMIT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ github.ref_name }}
+          ENV_VARS_FILE: ${{ steps.prepare-env.outputs.env_vars_file }}
+          SECRETS_FILE: ${{ steps.prepare-env.outputs.secrets_file }}
+          # GitHub context variables (available if include_github_secrets is true)
+          GITHUB_TOKEN: ${{ inputs.include_github_secrets == 'true' && secrets.GITHUB_TOKEN || '' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          echo "🚀 Starting deployment..."
+          echo "Repository: $REPOSITORY_URL"
+          echo "Environment: $ENVIRONMENT"
+          echo "Commit: $COMMIT_SHA"
+          echo "Branch: $BRANCH_NAME"
+          echo "Server: $CD_SERVER_HOST"
+          echo ""
+
+          # Prepare CLI arguments
+          CLI_ARGS=(
+            -server="$CD_SERVER_HOST"
+            -key="$CD_API_KEY"
+            -git="$REPOSITORY_URL"
+            -env="$ENVIRONMENT"
+          )
+
+          # Add environment variables file if it exists and has content
+          if [ -f "$ENV_VARS_FILE" ] && [ -s "$ENV_VARS_FILE" ]; then
+            CLI_ARGS+=(-env-file="$ENV_VARS_FILE")
+            echo "📋 Using environment variables file"
+          fi
+
+          # Prepare secrets for CLI
+          SECRETS_CLI_ARGS=""
+          if [ -f "$SECRETS_FILE" ] && [ -s "$SECRETS_FILE" ]; then
+            echo "🔐 Preparing secrets..."
+            SECRETS_CLI_ARGS="-secrets-file=$SECRETS_FILE"
+          fi
+
+          # Add GitHub secrets if requested
+          if [ "${{ inputs.include_github_secrets }}" = "true" ]; then
+            echo "🔐 Including GitHub context as secrets..."
+            # Create temporary secrets file with GitHub context
+            GITHUB_SECRETS_FILE=$(mktemp)
+            cat > "$GITHUB_SECRETS_FILE" << EOF
+          GITHUB_TOKEN=$GITHUB_TOKEN
+          GITHUB_REPOSITORY=$GITHUB_REPOSITORY
+          GITHUB_REF=$GITHUB_REF
+          GITHUB_SHA=$GITHUB_SHA
+          GITHUB_ACTOR=$GITHUB_ACTOR
+          GITHUB_WORKFLOW=$GITHUB_WORKFLOW
+          GITHUB_RUN_ID=$GITHUB_RUN_ID
+          GITHUB_RUN_NUMBER=$GITHUB_RUN_NUMBER
+          EOF
+            SECRETS_CLI_ARGS="-secrets-file=$GITHUB_SECRETS_FILE"
+          fi
+
+          # Add secrets arguments if we have any
+          if [ -n "$SECRETS_CLI_ARGS" ]; then
+            CLI_ARGS+=($SECRETS_CLI_ARGS)
+          fi
+
+          echo "🔧 CLI Arguments: ${CLI_ARGS[*]}"
+          echo ""
+
+          # Run deployment with timeout
+          timeout ${{ inputs.timeout }}m ./cd-cli "${CLI_ARGS[@]}" || {
+            EXIT_CODE=$?
+            if [ $EXIT_CODE -eq 124 ]; then
+              echo "❌ Deployment timed out after ${{ inputs.timeout }} minutes"
+            else
+              echo "❌ Deployment failed with exit code: $EXIT_CODE"
+            fi
+            exit $EXIT_CODE
+          }
+
+      - name: Post-deployment verification
+        if: success()
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo ""
+          echo "📊 Deployment Summary:"
+          echo "• Repository: ${{ github.repository }}"
+          echo "• Environment: ${{ inputs.environment }}"
+          echo "• Commit: ${{ github.sha }}"
+          echo "• Branch: ${{ github.ref_name }}"
+          echo "• Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "🔗 View deployment logs above for container details"
+
+      - name: Cleanup
+        if: always()
+        env:
+          ENV_VARS_FILE: ${{ steps.prepare-env.outputs.env_vars_file }}
+          SECRETS_FILE: ${{ steps.prepare-env.outputs.secrets_file }}
+        run: |
+          rm -f cd-cli
+
+          # Clean up temporary files
+          if [ -n "$ENV_VARS_FILE" ] && [ -f "$ENV_VARS_FILE" ]; then
+            rm -f "$ENV_VARS_FILE"
+          fi
+          if [ -n "$SECRETS_FILE" ] && [ -f "$SECRETS_FILE" ]; then
+            rm -f "$SECRETS_FILE"
+          fi
+
+          # Clean up any additional temporary files
+          rm -f /tmp/github_secrets_*
+
+          echo "🧹 Cleanup completed"
+
+  notify-success:
+    name: Notify Success
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: success()
+
+    steps:
+      - name: Success notification
+        run: |
+          echo "🎉 Deployment successful!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Commit: ${{ github.sha }}"
+
+  notify-failure:
+    name: Notify Failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+
+    steps:
+      - name: Failure notification
+        run: |
+          echo "💥 Deployment failed!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Commit: ${{ github.sha }}"
+          echo ""
+          echo "Check the deployment logs for error details."
+          exit 1

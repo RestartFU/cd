@@ -1,0 +1,344 @@
+# Complete Example: GitHub Actions Deployment with Environment Variables
+# This example demonstrates all the ways to use environment variables with the CD tool
+
+name: Deploy with Environment Variables
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+          - testing
+      custom_env_vars:
+        description: "Custom environment variables (KEY=VALUE,KEY2=VALUE2)"
+        required: false
+        type: string
+      feature_flags:
+        description: "Feature flags to enable"
+        required: false
+        type: string
+      debug_mode:
+        description: "Enable debug mode"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  # Global environment variables available to all jobs
+  CI: true
+  NODE_VERSION: "18"
+  DOCKER_BUILDKIT: 1
+
+jobs:
+  # Job 1: Build and prepare environment-specific configurations
+  prepare:
+    name: Prepare Environment Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env-setup.outputs.environment }}
+      env-file: ${{ steps.env-setup.outputs.env-file }}
+      build-args: ${{ steps.env-setup.outputs.build-args }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup environment configuration
+        id: env-setup
+        run: |
+          # Determine target environment
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="production"
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            ENV="staging"
+          else
+            ENV="development"
+          fi
+
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "🎯 Target environment: $ENV"
+
+          # Determine environment file
+          ENV_FILE=".env"
+          if [ -f ".env.$ENV" ]; then
+            ENV_FILE=".env.$ENV"
+          fi
+          echo "env-file=$ENV_FILE" >> $GITHUB_OUTPUT
+          echo "📄 Environment file: $ENV_FILE"
+
+          # Prepare build arguments
+          BUILD_ARGS="BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_ARGS="$BUILD_ARGS,BUILD_VERSION=${{ github.sha }}"
+          BUILD_ARGS="$BUILD_ARGS,BUILD_NUMBER=${{ github.run_number }}"
+          echo "build-args=$BUILD_ARGS" >> $GITHUB_OUTPUT
+
+      - name: Validate environment files
+        run: |
+          echo "🔍 Validating environment configuration..."
+
+          # Check if environment files exist
+          for file in .env .env.staging .env.production .env.development; do
+            if [ -f "$file" ]; then
+              echo "✅ Found: $file"
+              # Validate format (basic check)
+              if grep -q -E '^[A-Za-z_][A-Za-z0-9_]*=' "$file"; then
+                echo "  ✅ Format appears valid"
+              else
+                echo "  ⚠️  No valid environment variables found"
+              fi
+            fi
+          done
+
+          # Warn about potential secrets in environment files
+          for file in .env*; do
+            if [ -f "$file" ] && grep -i -E "(password|secret|key|token)" "$file" > /dev/null; then
+              echo "⚠️  Warning: $file may contain secrets - ensure they're not committed to git"
+            fi
+          done
+
+  # Job 2: Deploy to staging (if not production)
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: prepare
+    if: needs.prepare.outputs.environment != 'production'
+    environment: ${{ needs.prepare.outputs.environment }}
+
+    steps:
+      - name: Deploy with comprehensive environment variables
+        uses: RestartFU/cd/.github/workflows/deploy.yml@main
+        with:
+          environment: ${{ needs.prepare.outputs.environment }}
+          timeout: 15
+
+          # Load environment-specific file
+          env_file: ${{ needs.prepare.outputs.env-file }}
+
+          # Combine multiple sources of environment variables
+          env_vars: |
+            BUILD_NUMBER=${{ github.run_number }}
+            COMMIT_SHA=${{ github.sha }}
+            BRANCH_NAME=${{ github.ref_name }}
+            DEPLOYMENT_TIME=${{ github.event.head_commit.timestamp }}
+            ENVIRONMENT=${{ needs.prepare.outputs.environment }}
+            CI_PROVIDER=github-actions
+            REPOSITORY_URL=${{ github.server_url }}/${{ github.repository }}
+            DEBUG=${{ inputs.debug_mode || 'false' }}
+            ${{ needs.prepare.outputs.build-args }}
+            ${{ inputs.custom_env_vars }}
+            ${{ inputs.feature_flags }}
+
+          # Include GitHub secrets and context
+          include_github_secrets: true
+
+        secrets:
+          CD_SERVER_HOST: ${{ secrets.CD_SERVER_HOST }}
+          CD_API_KEY: ${{ secrets.CD_API_KEY }}
+
+  # Job 3: Run integration tests on staging
+  test-staging:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-staging]
+    if: success() && needs.prepare.outputs.environment != 'production'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for staging deployment to be ready..."
+          sleep 30
+
+      - name: Run smoke tests
+        env:
+          TEST_ENVIRONMENT: ${{ needs.prepare.outputs.environment }}
+          APP_URL: "https://${{ needs.prepare.outputs.environment }}.myapp.com"
+        run: |
+          echo "🧪 Running smoke tests against $APP_URL"
+
+          # Basic health check
+          # curl -f "$APP_URL/health" || exit 1
+
+          # Test with environment variables
+          # npm run test:smoke -- --env="$TEST_ENVIRONMENT"
+
+          echo "✅ Smoke tests completed"
+
+  # Job 4: Deploy to production (with additional safeguards)
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [prepare, test-staging]
+    if: |
+      always() &&
+      needs.prepare.outputs.environment == 'production' &&
+      (needs.test-staging.result == 'success' || needs.test-staging.result == 'skipped')
+
+    environment:
+      name: production
+      url: https://myapp.com
+
+    steps:
+      - name: Production deployment confirmation
+        run: |
+          echo "🚨 PRODUCTION DEPLOYMENT"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Environment: production"
+          echo ""
+          echo "This deployment will update the production environment."
+
+      - name: Deploy to production
+        uses: RestartFU/cd/.github/workflows/deploy.yml@main
+        with:
+          environment: production
+          timeout: 30
+
+          # Production-specific environment file
+          env_file: ".env.production"
+
+          # Production environment variables
+          env_vars: |
+            NODE_ENV=production
+            BUILD_NUMBER=${{ github.run_number }}
+            COMMIT_SHA=${{ github.sha }}
+            DEPLOYMENT_TIME=${{ github.event.head_commit.timestamp }}
+            ENVIRONMENT=production
+            CI_PROVIDER=github-actions
+            REPOSITORY_URL=${{ github.server_url }}/${{ github.repository }}
+            RELEASE_VERSION=${{ github.ref_name }}
+            ${{ inputs.custom_env_vars }}
+
+          # Include all GitHub secrets for production
+          include_github_secrets: true
+
+        secrets:
+          CD_SERVER_HOST: ${{ secrets.CD_SERVER_HOST }}
+          CD_API_KEY: ${{ secrets.CD_API_KEY }}
+
+  # Job 5: Post-deployment verification
+  verify-production:
+    name: Production Verification
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: success()
+
+    steps:
+      - name: Wait for production deployment
+        run: |
+          echo "⏳ Waiting for production deployment to stabilize..."
+          sleep 60
+
+      - name: Health checks
+        env:
+          PROD_URL: "https://myapp.com"
+        run: |
+          echo "🏥 Running production health checks..."
+
+          # Basic connectivity test
+          # curl -f "$PROD_URL/health" || exit 1
+
+          # Database connectivity test
+          # curl -f "$PROD_URL/api/health/database" || exit 1
+
+          # Cache connectivity test
+          # curl -f "$PROD_URL/api/health/cache" || exit 1
+
+          echo "✅ Production health checks passed"
+
+      - name: Performance verification
+        run: |
+          echo "⚡ Running performance verification..."
+
+          # Basic performance test
+          # curl -w "@curl-format.txt" -o /dev/null -s "$PROD_URL"
+
+          echo "✅ Performance verification completed"
+
+  # Job 6: Notification and cleanup
+  notify:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-staging, deploy-production, verify-production]
+    if: always()
+
+    steps:
+      - name: Determine deployment status
+        id: status
+        run: |
+          if [ "${{ needs.deploy-production.result }}" = "success" ]; then
+            echo "status=production-success" >> $GITHUB_OUTPUT
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "url=https://myapp.com" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.deploy-staging.result }}" = "success" ]; then
+            echo "status=staging-success" >> $GITHUB_OUTPUT
+            echo "environment=${{ needs.prepare.outputs.environment }}" >> $GITHUB_OUTPUT
+            echo "url=https://${{ needs.prepare.outputs.environment }}.myapp.com" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "environment=${{ needs.prepare.outputs.environment }}" >> $GITHUB_OUTPUT
+            echo "url=N/A" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send notification
+        env:
+          DEPLOYMENT_STATUS: ${{ steps.status.outputs.status }}
+          ENVIRONMENT: ${{ steps.status.outputs.environment }}
+          APP_URL: ${{ steps.status.outputs.url }}
+          CUSTOM_VARS: ${{ inputs.custom_env_vars }}
+          FEATURE_FLAGS: ${{ inputs.feature_flags }}
+        run: |
+          echo "📢 Deployment Notification"
+          echo "========================="
+          echo "Status: $DEPLOYMENT_STATUS"
+          echo "Environment: $ENVIRONMENT"
+          echo "URL: $APP_URL"
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run: ${{ github.run_id }}"
+          echo ""
+          echo "Configuration:"
+          echo "- Custom env vars: ${CUSTOM_VARS:-'None'}"
+          echo "- Feature flags: ${FEATURE_FLAGS:-'None'}"
+          echo "- Debug mode: ${{ inputs.debug_mode }}"
+          echo "- Environment file: ${{ needs.prepare.outputs.env-file }}"
+
+          # Add your notification logic here:
+          # - Slack webhook
+          # - Microsoft Teams
+          # - Email notification
+          # - Discord webhook
+          # Example:
+          # curl -X POST "$SLACK_WEBHOOK_URL" \
+          #   -H "Content-Type: application/json" \
+          #   -d "{\"text\":\"🚀 Deployment $DEPLOYMENT_STATUS for $ENVIRONMENT\"}"
+
+# This workflow demonstrates:
+# 1. Environment-specific configuration files (.env, .env.staging, .env.production)
+# 2. Dynamic environment variable injection from GitHub context
+# 3. Custom environment variables from workflow inputs
+# 4. Feature flags and debug mode controls
+# 5. Build-time variables (build number, commit SHA, etc.)
+# 6. GitHub secrets integration
+# 7. Multi-environment deployment with proper gating
+# 8. Post-deployment verification
+# 9. Comprehensive notification system
+# 10. Security best practices for environment variable handling

@@ -1,0 +1,248 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  GO_VERSION: '1.25.1'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Format check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "The following files are not formatted:"
+          gofmt -s -l .
+          exit 1
+        fi
+
+    - name: Vet code
+      run: go vet ./...
+
+    - name: Run unit tests
+      run: make test-unit
+
+    - name: Run full test suite
+      run: ./test.sh
+
+    - name: Test build process
+      run: make build
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          bin/
+          *.log
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Run security scan
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-fmt sarif -out gosec.sarif ./...'
+
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: gosec.sarif
+
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.event_name == 'push' || github.event_name == 'release'
+
+    strategy:
+      matrix:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+        exclude:
+          - os: windows
+            arch: arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Build binaries
+      env:
+        GOOS: ${{ matrix.os }}
+        GOARCH: ${{ matrix.arch }}
+      run: |
+        mkdir -p dist
+        EXT=""
+        if [ "${{ matrix.os }}" = "windows" ]; then
+          EXT=".exe"
+        fi
+
+        go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME:-dev} -X main.commit=${GITHUB_SHA::7}" \
+          -o dist/cd-server-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/server
+
+        go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME:-dev} -X main.commit=${GITHUB_SHA::7}" \
+          -o dist/cd-cli-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/cli
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: binaries-${{ matrix.os }}-${{ matrix.arch }}
+        path: dist/
+        retention-days: 30
+
+  docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.event_name == 'push' || github.event_name == 'release'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    if: github.event_name == 'release'
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release/
+        find artifacts/ -name "cd-*" -type f -exec cp {} release/ \;
+
+        # Create checksums
+        cd release/
+        sha256sum cd-* > checksums.txt
+
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+
+  notify:
+    name: Notify Deployment
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: always() && github.event_name == 'release'
+
+    steps:
+    - name: Notify success
+      if: needs.release.result == 'success'
+      run: |
+        echo "✅ CD Tool release ${{ github.ref_name }} completed successfully"
+        echo "Docker images and binaries are available"
+
+    - name: Notify failure
+      if: needs.release.result == 'failure'
+      run: |
+        echo "❌ CD Tool release ${{ github.ref_name }} failed"
+        echo "Check the workflow logs for details"
+        exit 1

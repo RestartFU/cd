@@ -8,6 +8,6 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		ListenAddr: ":8080",
-		APIKeys:    []string{"nigga"},
+		APIKeys:    []string{"default"},
 	}
 }
