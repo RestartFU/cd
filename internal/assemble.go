@@ -3,13 +3,16 @@ package internal
 import (
 	"github.com/restartfu/cd/internal/adapters/docker"
 	"github.com/restartfu/cd/internal/adapters/handler"
+	"github.com/restartfu/cd/internal/config"
+	"github.com/restartfu/cd/internal/protocol"
 )
 
-// CreateHandler creates a complete handler with docker adapter
-func CreateHandler() (*handler.Adapter, error) {
+func Assemble(cfg config.Config) (*protocol.Server, error) {
 	dockerAdapter, err := docker.NewAdapter()
 	if err != nil {
 		return nil, err
 	}
-	return handler.NewAdapter(dockerAdapter), nil
+
+	h := handler.NewAdapter(dockerAdapter, cfg)
+	return protocol.NewServer(h, cfg), nil
 }

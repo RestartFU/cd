@@ -9,26 +9,20 @@ import (
 
 	"github.com/restartfu/cd/internal"
 	"github.com/restartfu/cd/internal/config"
-	"github.com/restartfu/cd/internal/protocol"
 	"github.com/restartfu/gophig"
 )
 
 func main() {
-	cfg, err := loadConfig("config/config.toml")
+	cfg, err := loadConfig("config.toml")
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	// Create the handler
-	handler, err := internal.CreateHandler()
+	server, err := internal.Assemble(cfg)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	// Create TCP server
-	server := protocol.NewServer(handler, cfg)
-
-	// Setup graceful shutdown
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 
@@ -41,7 +35,6 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Start the server
 	log.Printf("Starting TCP server on %s", cfg.ListenAddr)
 	if err := server.Start(cfg.ListenAddr); err != nil {
 		log.Fatalf("Server failed: %v", err)

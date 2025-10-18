@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	// ANSI color codes
 	colorReset  = "\033[0m"
 	colorRed    = "\033[31m"
 	colorGreen  = "\033[32m"
@@ -50,13 +49,11 @@ func main() {
 		return
 	}
 
-	// If no arguments provided, enter interactive mode
 	if *gitURL == "" {
 		runInteractiveMode(*serverAddr, *apiKey, *environment)
 		return
 	}
 
-	// Parse environment variables and secrets
 	envVarMap, err := parseEnvironmentVariables(*envFile, *envVars)
 	if err != nil {
 		fmt.Printf("%sError parsing environment variables:%s %v\n", colorRed, colorReset, err)
@@ -69,7 +66,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run single deployment
 	if *apiKey == "" {
 		fmt.Printf("%sError:%s API key is required\n", colorRed, colorReset)
 		os.Exit(1)
@@ -94,6 +90,7 @@ func showHelp() {
 	fmt.Printf("  %s-env-vars%s string  Comma-separated environment variables (KEY=VALUE,KEY2=VALUE2)\n", colorYellow, colorReset)
 	fmt.Printf("  %s-secrets-file%s string Path to secrets file (.env format)\n", colorYellow, colorReset)
 	fmt.Printf("  %s-secrets%s string   Comma-separated secrets (KEY=VALUE,KEY2=VALUE2)\n", colorYellow, colorReset)
+	fmt.Printf("  %s-ssh-key%s string   Path to SSH private key file for git cloning\n", colorYellow, colorReset)
 	fmt.Printf("  %s-diagnose%s         Run Docker connection diagnostics\n", colorYellow, colorReset)
 	fmt.Printf("  %s-help%s             Show this help message\n", colorYellow, colorReset)
 	fmt.Println()
@@ -115,7 +112,6 @@ func runInteractiveMode(serverAddr, defaultAPIKey, defaultEnv string) {
 
 	reader := bufio.NewReader(os.Stdin)
 
-	// Get server address
 	if serverAddr == "localhost:8080" {
 		fmt.Printf("Server address [%s]: ", serverAddr)
 		if input := readLine(reader); input != "" {
@@ -123,7 +119,6 @@ func runInteractiveMode(serverAddr, defaultAPIKey, defaultEnv string) {
 		}
 	}
 
-	// Get API key
 	apiKey := defaultAPIKey
 	if apiKey == "" {
 		fmt.Print("API key: ")
@@ -137,7 +132,6 @@ func runInteractiveMode(serverAddr, defaultAPIKey, defaultEnv string) {
 	for {
 		fmt.Printf("\n%s=== New Deployment ===%s\n", colorBold+colorGreen, colorReset)
 
-		// Get Git URL
 		fmt.Print("Git repository URL: ")
 		gitURL := readLine(reader)
 		if gitURL == "" {
@@ -145,20 +139,17 @@ func runInteractiveMode(serverAddr, defaultAPIKey, defaultEnv string) {
 			continue
 		}
 
-		// Get environment
 		environment := defaultEnv
 		fmt.Printf("Environment [%s]: ", environment)
 		if input := readLine(reader); input != "" {
 			environment = input
 		}
 
-		// Run deployment
 		fmt.Printf("\n%sStarting deployment...%s\n", colorYellow, colorReset)
 		if err := runDeployment(serverAddr, apiKey, gitURL, environment, nil, nil); err != nil {
 			fmt.Printf("%sDeployment failed:%s %v\n", colorRed, colorReset, err)
 		}
 
-		// Ask for another deployment
 		fmt.Printf("\n%sDeploy another repository? (y/N): %s", colorCyan, colorReset)
 		if response := readLine(reader); !strings.HasPrefix(strings.ToLower(response), "y") {
 			break
@@ -173,18 +164,15 @@ func readLine(reader *bufio.Reader) string {
 	return strings.TrimSpace(line)
 }
 
-// parseEnvironmentVariables parses environment variables from file and/or command line
 func parseEnvironmentVariables(filePath, envVarsString string) (map[string]string, error) {
 	envVars := make(map[string]string)
 
-	// Parse from file if provided
 	if filePath != "" {
 		if err := parseEnvFile(filePath, envVars); err != nil {
 			return nil, fmt.Errorf("failed to parse environment file %s: %w", filePath, err)
 		}
 	}
 
-	// Parse from command line if provided
 	if envVarsString != "" {
 		if err := parseEnvString(envVarsString, envVars); err != nil {
 			return nil, fmt.Errorf("failed to parse environment variables: %w", err)
@@ -194,7 +182,6 @@ func parseEnvironmentVariables(filePath, envVarsString string) (map[string]strin
 	return envVars, nil
 }
 
-// parseEnvFile parses environment variables from a .env file
 func parseEnvFile(filePath string, envVars map[string]string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -208,12 +195,10 @@ func parseEnvFile(filePath string, envVars map[string]string) error {
 		lineNum++
 		line := strings.TrimSpace(scanner.Text())
 
-		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		// Parse KEY=VALUE format
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid format at line %d: %s", lineNum, line)
@@ -222,7 +207,6 @@ func parseEnvFile(filePath string, envVars map[string]string) error {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 
-		// Remove quotes if present
 		if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
 			(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
 			value = value[1 : len(value)-1]
@@ -234,7 +218,6 @@ func parseEnvFile(filePath string, envVars map[string]string) error {
 	return scanner.Err()
 }
 
-// parseEnvString parses environment variables from a comma-separated string
 func parseEnvString(envVarsString string, envVars map[string]string) error {
 	pairs := strings.Split(envVarsString, ",")
 	for _, pair := range pairs {
@@ -259,10 +242,6 @@ func parseEnvString(envVarsString string, envVars map[string]string) error {
 func runDockerDiagnostics() {
 	fmt.Printf("%s=== Docker Diagnostics ===%s\n", colorBold+colorCyan, colorReset)
 	fmt.Println()
-
-	// Import the docker adapter for diagnostics
-	// Note: This would require importing the docker package
-	// For now, we'll do basic diagnostics here
 
 	fmt.Printf("%sSystem Information:%s\n", colorYellow, colorReset)
 	fmt.Printf("Operating System: %s\n", runtime.GOOS)
@@ -290,7 +269,7 @@ func runDockerDiagnostics() {
 		socketPaths = []string{"/var/run/docker.sock"}
 	case "windows":
 		fmt.Printf("Windows: Using named pipe ////./pipe/docker_engine\n")
-		socketPaths = []string{} // No files to check on Windows
+		socketPaths = []string{}
 	}
 
 	for _, path := range socketPaths {
@@ -326,36 +305,30 @@ func runDockerDiagnostics() {
 }
 
 func runDeployment(serverAddr, apiKey, gitURL, environment string, envVars, secrets map[string]string) error {
-	// Create client
 	client := protocol.NewClient()
 
-	// Connect to server
 	fmt.Printf("%s[INFO]%s Connecting to server %s...\n", colorBlue, colorReset, serverAddr)
 	if err := client.Connect(serverAddr); err != nil {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 	defer client.Close()
 
-	// Authenticate
 	fmt.Printf("%s[INFO]%s Authenticating...\n", colorBlue, colorReset)
 	if err := client.Authenticate(apiKey); err != nil {
 		return fmt.Errorf("failed to send auth: %w", err)
 	}
 
-	// Wait for authentication response
 	if err := client.WaitForAuth(); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	fmt.Printf("%s[SUCCESS]%s Authenticated successfully\n", colorGreen, colorReset)
 
-	// Start deployment
-	updateChan, err := client.DeployWithEnv(gitURL, environment, envVars, secrets)
+	updateChan, err := client.Deploy(gitURL, environment, envVars, secrets)
 	if err != nil {
 		return fmt.Errorf("failed to start deployment: %w", err)
 	}
 
-	// Process updates
 	var finalResult *protocol.ResultMessage
 	var finalError *protocol.ErrorMessage
 
@@ -385,7 +358,6 @@ func runDeployment(serverAddr, apiKey, gitURL, environment string, envVars, secr
 		}
 	}
 
-	// Print final result
 	fmt.Printf("\n%s=== Deployment Result ===%s\n", colorBold+colorCyan, colorReset)
 
 	if finalError != nil {

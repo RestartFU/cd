@@ -6,79 +6,81 @@ import (
 	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	"github.com/restartfu/cd/internal/config"
+	"github.com/restartfu/cd/internal/ports"
 )
 
-type DockerAdapter interface {
-	BuildAndStartContainer(imageName, name string, envVars map[string]string) (string, error)
-	DestroyContainer(containerID string) error
-}
-
-type DeployResult struct {
-	Message string
-	Success bool
-	Error   error
-}
-
 type Adapter struct {
-	dockerAdapter DockerAdapter
+	dockerAdapter ports.Docker
+	config        config.Config
 }
 
-func NewAdapter(dockerAdapter DockerAdapter) *Adapter {
-	return &Adapter{dockerAdapter: dockerAdapter}
+func NewAdapter(dockerAdapter ports.Docker, cfg config.Config) *Adapter {
+	return &Adapter{
+		dockerAdapter: dockerAdapter,
+		config:        cfg,
+	}
 }
 
-func (a *Adapter) Deploy(gitURL, environment string) *DeployResult {
-	return a.DeployWithEnv(gitURL, environment, nil, nil)
-}
+func (a *Adapter) Deploy(gitURL, environment string, envVars, secrets map[string]string) *ports.DeployResult {
+	var auth *ssh.PublicKeys
+	var err error
 
-func (a *Adapter) DeployWithEnv(gitURL, environment string, envVars, secrets map[string]string) *DeployResult {
+	// Use provided SSH key path, then fall back to config, then to default
+	keyPath := a.config.SSHKeyPath
+	if keyPath == "" && a.config.SSHKeyPath != "" {
+		keyPath = a.config.SSHKeyPath
+	}
+	if keyPath == "" {
+		keyPath = "/home/restart/.ssh/id_ed25519"
+	}
+
+	auth, err = ssh.NewPublicKeysFromFile("git", keyPath, "")
+	if err != nil {
+		fmt.Println("Failed to load SSH key from", keyPath, ":", err)
+		return &ports.DeployResult{Message: fmt.Sprintf("Failed to load SSH key from %s: %v", keyPath, err), Success: false, Error: err}
+	}
 	containerName := filepath.Base(gitURL)
 
-	// Destroy existing container
 	_ = a.dockerAdapter.DestroyContainer(containerName)
 
-	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "repo-*")
-	if err != nil {
-		fmt.Println("Failed to create temp dir:", err)
-		return &DeployResult{Message: err.Error(), Success: false, Error: err}
+	tmpDir, err2 := os.MkdirTemp("", "repo-*")
+	if err2 != nil {
+		fmt.Println("Failed to create temp dir:", err2)
+		return &ports.DeployResult{Message: err2.Error(), Success: false, Error: err2}
 	}
-	defer os.RemoveAll(tmpDir) // cleanup
+	defer os.RemoveAll(tmpDir)
 
-	// Clone repository using go-git
 	fmt.Println("Cloning repository:", gitURL)
 	_, err = git.PlainClone(tmpDir, false, &git.CloneOptions{
+		Auth:     auth,
 		URL:      gitURL,
 		Progress: os.Stdout,
 	})
 	if err != nil {
 		fmt.Println("Git clone failed:", err)
-		return &DeployResult{Message: err.Error(), Success: false, Error: err}
+		return &ports.DeployResult{Message: err.Error(), Success: false, Error: err}
 	}
 
-	// Merge environment variables and secrets
 	allEnvVars := make(map[string]string)
 
-	// Add environment variables
 	for k, v := range envVars {
 		allEnvVars[k] = v
 	}
 
-	// Add secrets (they can override env vars)
 	for k, v := range secrets {
 		allEnvVars[k] = v
 	}
 
-	// Add deployment environment
 	allEnvVars["DEPLOYMENT_ENV"] = environment
 
-	// Build and start Docker container
 	msg, err := a.dockerAdapter.BuildAndStartContainer(tmpDir, containerName, allEnvVars)
 	if err != nil {
 		fmt.Println("Docker build/start failed:", err)
-		return &DeployResult{Message: err.Error(), Success: false, Error: err}
+		return &ports.DeployResult{Message: err.Error(), Success: false, Error: err}
 	}
 
 	fmt.Println(msg)
-	return &DeployResult{Message: "SUCCESS", Success: true, Error: nil}
+	return &ports.DeployResult{Message: "SUCCESS", Success: true, Error: nil}
 }

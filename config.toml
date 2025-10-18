@@ -1,0 +1,3 @@
+listen_addr = ':8080'
+api_key = 'default'
+ssh_key_path = ''
