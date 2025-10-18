@@ -1,185 +1,159 @@
-# CD Tool - TCP Continuous Deployment
+# CD - Continuous Deployment Tool
 
-A high-performance continuous deployment tool built on pure TCP for real-time communication between client and server. Deploy applications from Git repositories to Docker containers with live log streaming and status updates.
+A lightweight continuous deployment tool using pure TCP for real-time communication. Deploy applications from Git repositories to Docker containers with live log streaming.
 
 ## Features
 
-- **Pure TCP Communication** - Fast, persistent connections for real-time updates
-- **Real-time Log Streaming** - See deployment logs as they happen
-- **Interactive CLI** - User-friendly command-line interface with colored output
-- **Docker Integration** - Automatic Docker image building and container deployment
-- **Git Repository Support** - Clone and deploy from any Git repository
-- **Progress Tracking** - Visual progress bars and status updates
-- **API Key Authentication** - Secure access control
-- **Environment Variables & Secrets** - Secure injection of configuration and credentials
-- **GitHub Actions Integration** - Ready-to-use workflow templates
-- **Multi-environment Support** - Deploy to different environments
+- **Pure TCP Protocol** - Fast, persistent connections for real-time updates
+- **Real-time Logging** - Stream deployment logs as they happen
+- **Docker Integration** - Automatic container building and deployment
+- **Environment Variables** - Inject configuration and secrets into containers
+- **Interactive CLI** - User-friendly interface with colored output and progress bars
+- **API Authentication** - Secure server access with API keys
+- **SSH Key Support** - Server-side SSH key configuration for private repositories
 
-## Quick Start
+## Installation
 
-### 1. Install
+### Download Binary
 
 ```bash
-# Download latest release
 curl -L -o cd-cli https://github.com/RestartFU/cd/releases/latest/download/cd-cli-linux-amd64
 chmod +x cd-cli
+```
 
-# Or build from source
+### Build from Source
+
+```bash
 git clone https://github.com/RestartFU/cd.git
 cd cd
 make build
 ```
 
-### 2. Start Server
+Binaries will be in `bin/`:
+- `bin/cd-server` - Server component
+- `bin/cd-cli` - CLI client
 
-```bash
-# Configure server
-cat > config/config.toml << EOF
-listen_addr = ':8080'
-api_keys = ['your-secret-key']
-EOF
+## Quick Start
 
-# Start server
-./bin/cd-server
-```
+### 1. Configure Server
 
-### 3. Deploy with CLI
-
-```bash
-# Interactive mode
-./cd-cli
-
-# Direct deployment
-./cd-cli -server=localhost:8080 -key=your-secret-key -git=https://github.com/user/repo.git
-
-# Deploy with environment variables
-./cd-cli -server=localhost:8080 -key=your-secret-key -git=https://github.com/user/repo.git \
-         -env-vars="API_KEY=value,DEBUG=true" -env-file=".env.production"
-```
-
-## GitHub Actions Integration
-
-### Setup Secrets
-
-Add these secrets to your repository:
-
-- `CD_SERVER_HOST` - Your CD server address (e.g., `cd-server.example.com:8080`)
-- `CD_API_KEY` - Your API key for authentication
-
-### Simple Deployment
-
-Create `.github/workflows/deploy.yml`:
-
-```yaml
-name: Deploy Application
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  deploy:
-    uses: RestartFU/cd/.github/workflows/deploy.yml@main
-    with:
-      environment: production
-      env_vars: "BUILD_NUMBER=${{ github.run_number }}"
-      include_github_secrets: true
-    secrets:
-      CD_SERVER_HOST: ${{ secrets.CD_SERVER_HOST }}
-      CD_API_KEY: ${{ secrets.CD_API_KEY }}
-```
-
-### Advanced Deployment
-
-Use the advanced template from `workflow-templates/deploy-advanced.yml` for:
-- Multi-environment support
-- Pre-deployment validation
-- Integration testing
-- Rollback capabilities
-
-## Configuration
+Create `config/config.toml`:
 
 ```toml
 listen_addr = ':8080'
-api_keys = ['your-secret-key']
+api_keys = ['your-secret-api-key']
+ssh_key_path = ''  # Optional: path to SSH private key for git cloning
 ```
 
-## CLI Usage
+### 2. Start Server
 
 ```bash
-# Options
-./cd-cli -server=HOST:PORT -key=API_KEY -git=REPO_URL -env=ENVIRONMENT
-
-# Examples
-./cd-cli -key=secret -git=https://github.com/user/repo.git
-./cd-cli -key=secret -git=https://github.com/user/repo.git -env=staging
-./cd-cli -server=remote:8080 -key=secret -git=https://github.com/user/repo.git
-
-# With environment variables
-./cd-cli -key=secret -git=https://github.com/user/repo.git \
-         -env-vars="API_KEY=value,DEBUG=false" \
-         -env-file=".env.production"
-
-# With secrets file
-./cd-cli -key=secret -git=https://github.com/user/repo.git \
-         -secrets-file=".secrets" \
-         -env="production"
+./bin/cd-server
 ```
 
-## Docker Deployment
+The server will:
+- Listen on the configured port (default: 8080)
+- Accept authenticated TCP connections
+- Clone repositories and build Docker containers
 
-### Quick Docker Setup (Recommended)
+### 3. Deploy with CLI
 
-Use the automated setup script for easy Docker deployment:
+**Interactive Mode:**
 
 ```bash
-# Automated setup with all dependencies
-./scripts/docker-setup.sh
-
-# Or with custom options
-./scripts/docker-setup.sh --port 9000 --logs
+./bin/cd-cli
 ```
 
-### Docker Compose
+**Direct Deployment:**
 
 ```bash
-# Basic setup
-docker-compose up -d
-
-# With monitoring and caching
-docker-compose --profile cache --profile monitoring up -d
+./bin/cd-cli \
+  -server=localhost:8080 \
+  -key=your-secret-api-key \
+  -git=git@github.com:user/repo.git
 ```
 
-### Manual Docker Setup
+**With Environment Variables:**
 
 ```bash
-# Build the image
-docker build -t cd-tool:latest .
-
-# Run the container
-docker run -d \
-  --name cd-server \
-  --restart unless-stopped \
-  -p 8080:8080 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd)/config/config.toml:/app/config.toml:ro \
-  cd-tool:latest
+./bin/cd-cli \
+  -server=localhost:8080 \
+  -key=your-secret-api-key \
+  -git=git@github.com:user/repo.git \
+  -env=production \
+  -env-vars="API_KEY=value,DEBUG=false" \
+  -secrets-file=.secrets
 ```
 
-### Docker Features
+## CLI Options
 
-- **Automated OS-specific Docker socket detection**
-- **Health checks and automatic restart**
-- **Non-root container security**
-- **Volume mounting for configuration**
-- **Multi-stage builds for smaller images**
-- **Optional monitoring with Prometheus/Grafana**
+```
+-server string       Server address (default "localhost:8080")
+-key string          API key for authentication
+-git string          Git repository URL
+-env string          Environment name (default "production")
+-env-file string     Path to environment variables file (.env format)
+-env-vars string     Comma-separated environment variables (KEY=VALUE)
+-secrets-file string Path to secrets file (.env format)
+-secrets string      Comma-separated secrets (KEY=VALUE)
+-diagnose            Run Docker diagnostics
+-help                Show help message
+```
 
-📖 **For complete Docker deployment guide, see [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)**
+## SSH Key Configuration
 
-### Repository Requirements
+SSH keys are configured on the server side in `config/config.toml`:
 
-Your repository needs a `Dockerfile`:
+```toml
+ssh_key_path = '/home/user/.ssh/id_ed25519'
+```
+
+**Fallback behavior:**
+- If `ssh_key_path` is set, the server uses that key
+- If empty or not set, defaults to `/home/restart/.ssh/id_ed25519`
+
+This allows the server to clone private repositories without exposing SSH keys to clients.
+
+## Environment Variables
+
+### From File
+
+Create `.env` file:
+
+```
+NODE_ENV=production
+PORT=3000
+API_URL=https://api.example.com
+```
+
+Deploy:
+
+```bash
+./bin/cd-cli -env-file=.env -git=git@github.com:user/repo.git
+```
+
+### From Command Line
+
+```bash
+./bin/cd-cli -env-vars="PORT=3000,DEBUG=true" -git=git@github.com:user/repo.git
+```
+
+### Secrets
+
+Separate secrets from environment variables:
+
+```bash
+./bin/cd-cli \
+  -env-file=.env.production \
+  -secrets-file=.secrets \
+  -git=git@github.com:user/repo.git
+```
+
+Secrets override environment variables with the same name and are masked in logs.
+
+## Repository Requirements
+
+Your repository must contain a `Dockerfile`:
 
 ```dockerfile
 FROM node:18-alpine
@@ -191,164 +165,127 @@ EXPOSE 3000
 CMD ["npm", "start"]
 ```
 
-### Docker Management Commands
-
-```bash
-# View container status
-docker ps --filter name=cd-server
-
-# View logs
-docker logs -f cd-server
-
-# Stop/start container
-docker stop cd-server
-docker start cd-server
-
-# Update deployment
-./scripts/docker-setup.sh --rebuild
-
-# Complete cleanup
-./scripts/docker-setup.sh --remove
-```
-
-## Environment Variables & Secrets
-
-The CD tool supports secure injection of environment variables and secrets into your containers:
-
-### Environment Files
-
-Create `.env` files for your configuration:
-
-```bash
-# .env.production
-NODE_ENV=production
-PORT=3000
-API_ENDPOINT=https://api.prod.example.com
-```
-
-### GitHub Actions with Environment Variables
-
-```yaml
-deploy:
-  uses: RestartFU/cd/.github/workflows/deploy.yml@main
-  with:
-    environment: production
-    env_file: ".env.production"
-    env_vars: "BUILD_ID=${{ github.run_id }},COMMIT_SHA=${{ github.sha }}"
-    include_github_secrets: true
-  secrets:
-    CD_SERVER_HOST: ${{ secrets.CD_SERVER_HOST }}
-    CD_API_KEY: ${{ secrets.CD_API_KEY }}
-```
-
-### CLI with Environment Variables
-
-```bash
-# From environment file
-./cd-cli -env-file=".env.production" -git=https://github.com/user/repo.git
-
-# From command line
-./cd-cli -env-vars="API_KEY=value,DEBUG=true" -git=https://github.com/user/repo.git
-
-# With secrets file
-./cd-cli -secrets-file=".secrets" -git=https://github.com/user/repo.git
-```
-
-### Security Features
-
-- **Secrets are masked** in deployment logs
-- **Environment-specific configurations** with different `.env` files
-- **GitHub secrets integration** - automatically include repository secrets
-- **Precedence handling** - secrets override environment variables
-
-📖 **For complete documentation, see [docs/ENVIRONMENT_VARIABLES.md](docs/ENVIRONMENT_VARIABLES.md)**
-
-## Development
-
-```bash
-# Build
-make build
-
-# Test
-make test
-
-# Run tests
-./scripts/test.sh
-
-# Format & vet
-make fmt
-make vet
-
-# Cross-platform build
-make release
-```
+The server will:
+1. Clone the repository
+2. Build the Docker image
+3. Start a container with environment variables injected
 
 ## Protocol
 
-JSON messages over TCP:
+The client and server communicate using JSON messages over TCP:
 
+**Authentication:**
 ```json
-{"type":"auth","data":{"api_key":"secret"}}
-{"type":"deploy","data":{"git_url":"https://github.com/user/repo.git","environment":"production","env_vars":{"API_KEY":"value"},"secrets":{"DB_PASSWORD":"secret"}}}
-{"type":"log","data":{"level":"info","message":"Cloning repository...","source":"git"}}
+{"type":"auth","timestamp":"2024-01-01T00:00:00Z","data":{"api_key":"secret"}}
+```
+
+**Deploy Request:**
+```json
+{
+  "type":"deploy",
+  "timestamp":"2024-01-01T00:00:00Z",
+  "data":{
+    "git_url":"git@github.com:user/repo.git",
+    "environment":"production",
+    "env_vars":{"PORT":"3000"},
+    "secrets":{"DB_PASSWORD":"secret"},
+    "ssh_key_path":"/path/to/key"
+  }
+}
+```
+
+**Server Responses:**
+```json
+{"type":"log","data":{"level":"info","message":"Cloning repository","source":"git"}}
 {"type":"status","data":{"stage":"building","progress":50,"message":"Building image"}}
 {"type":"result","data":{"success":true,"message":"SUCCESS","duration":"45s"}}
+{"type":"error","data":{"code":"DEPLOY_FAILED","message":"Build failed"}}
 ```
 
 ## Architecture
 
 ```
-┌─────────────────┐    TCP     ┌─────────────────┐
-│   CLI Client    │◄──────────►│   TCP Server    │
-│                 │            │                 │
-│ • Interactive   │            │ • Authentication│
-│ • Colored logs  │            │ • Log streaming │
-│ • Progress bars │            │ • Git cloning   │
-└─────────────────┘            │ • Docker builds │
-                               └─────────────────┘
-                                        │
-                                        ▼
-                               ┌─────────────────┐
-                               │ Docker Daemon   │
-                               │                 │
-                               │ • Build images  │
-                               │ • Run containers│
-                               └─────────────────┘
+┌─────────────┐         ┌─────────────┐         ┌─────────────┐
+│  CLI Client │◄───TCP──►│  CD Server  │────────►│   Docker    │
+│             │         │             │         │   Daemon    │
+│ • Auth      │         │ • Git clone │         │             │
+│ • Deploy    │         │ • Build     │         │ • Build     │
+│ • Stream    │         │ • Deploy    │         │ • Run       │
+└─────────────┘         └─────────────┘         └─────────────┘
 ```
 
-## What's New - Environment Variables & Secrets Support
+## Development
 
-We've significantly enhanced the CD tool with comprehensive environment variables and secrets management:
+```bash
+# Build both components
+make build
 
-### 🔐 New Security Features
-- **Environment file support** - Load variables from `.env`, `.env.staging`, `.env.production` files
-- **Command-line variables** - Pass variables directly via CLI arguments
-- **GitHub secrets integration** - Automatically include repository secrets as environment variables
-- **Secrets masking** - Sensitive values are automatically hidden in deployment logs
+# Build separately
+go build -o bin/cd-server ./cmd/server
+go build -o bin/cd-cli ./cmd/cli
 
-### 🚀 Enhanced GitHub Actions
-- **Automatic secret injection** - Set `include_github_secrets: true` to pass all GitHub secrets to containers
-- **Environment-specific configs** - Use different `.env` files for staging/production
-- **Build metadata** - Automatically inject build numbers, commit SHAs, and deployment context
-- **Flexible configuration** - Combine environment files, command-line vars, and secrets
+# Format code
+make fmt
 
-### 💻 CLI Enhancements
-New CLI options for environment variable management:
-- `-env-file` - Load variables from environment files
-- `-env-vars` - Pass comma-separated environment variables
-- `-secrets-file` - Load secrets from protected files
-- `-secrets` - Pass secrets via command line
+# Run tests
+make test
 
-### 🛡️ Security Best Practices
-- Environment variables and secrets are handled separately
-- Secrets always override environment variables
-- Automatic masking of sensitive values in logs
-- Support for environment-specific configuration files
+# Clean build artifacts
+make clean
+```
 
-For complete documentation and examples, see:
-- [Environment Variables Guide](docs/ENVIRONMENT_VARIABLES.md)
-- [Example Workflow](examples/deploy-with-env-vars.yml)
-- [Environment File Template](.env.example)
+## Docker Deployment
+
+Run the CD server in Docker:
+
+```bash
+docker run -d \
+  --name cd-server \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v $(pwd)/config:/app/config \
+  -v ~/.ssh:/root/.ssh:ro \
+  cd-server:latest
+```
+
+## Troubleshooting
+
+### Docker Socket Issues
+
+Run diagnostics:
+
+```bash
+./bin/cd-cli -diagnose
+```
+
+### SSH Key Problems
+
+Verify key permissions:
+
+```bash
+chmod 600 ~/.ssh/id_ed25519
+ssh-add ~/.ssh/id_ed25519
+```
+
+Test Git access:
+
+```bash
+ssh -T git@github.com
+```
+
+### Connection Issues
+
+Check server is running:
+
+```bash
+netstat -tuln | grep 8080
+```
+
+Test connection:
+
+```bash
+telnet localhost 8080
+```
 
 ## License
 
