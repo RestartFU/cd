@@ -37,11 +37,11 @@ Binaries will be in `bin/`:
 
 ### 1. Configure Server
 
-Create `config/config.toml`:
+Create `config.toml`:
 
 ```toml
 listen_addr = ':8080'
-api_keys = ['your-secret-api-key']
+api_key = 'your-secret-api-key'
 ssh_key_path = ''  # Optional: path to SSH private key for git cloning
 ```
 
